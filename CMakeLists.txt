@@ -54,41 +54,81 @@ message(STATUS "Internal miniwin:       ${ISLE_MINIWIN}")
 message(STATUS "Isle debugging:         ${ISLE_DEBUG}")
 message(STATUS "Compile shaders:        ${ISLE_COMPILE_SHADERS}")
 
+# Searching for compatible libraries
+# -----
+# 1. Look for compatible installed versions first
+# 2. If not found and 'DOWNLOAD_DEPENDENCIES' is
+#   2a. 'ON': pull missing deps
+#   2b. 'OFF' fail configuration
+include(FetchContent)
+
 add_library(Isle::iniparser INTERFACE IMPORTED)
+set(install_extra_targets)
 
-if (DOWNLOAD_DEPENDENCIES)
-    # FetchContent downloads and configures dependencies
-    message(STATUS "Fetching SDL3 and iniparser. This might take a while...")
-    include(FetchContent)
-    FetchContent_Declare(
-        SDL3
-        GIT_REPOSITORY "https://github.com/libsdl-org/SDL.git"
-        GIT_TAG "main"
-        EXCLUDE_FROM_ALL
-    )
-    FetchContent_MakeAvailable(SDL3)
+# Find or pull SDL3 ~3.2
+FetchContent_Declare(
+    SDL3
+    GIT_REPOSITORY "https://github.com/libsdl-org/SDL.git"
+    GIT_TAG "release-3.2.16"
+    EXCLUDE_FROM_ALL
+    FIND_PACKAGE_ARGS NAMES SDL3 3.2 CONFIG COMPONENTS SDL3-shared
+)
+if (FETCHCONTENT_SOURCE_DIR_SDL3)
+    # Configure the downloaded SDL3 as a static lib to simplify distribution
+    set(SDL_SHARED OFF)
+    set(SDL_STATIC ON)
+    set(SDL_TEST_LIBRARY OFF)
+    set(SDL_TESTS OFF)
+    set(SDL_DISABLE_INSTALL_DOCS ON)
+endif()
 
-    FetchContent_Declare(
+# Find or pull iniparser ~4.2
+FetchContent_Declare(
         iniparser
         GIT_REPOSITORY "https://gitlab.com/iniparser/iniparser.git"
-        GIT_TAG "main"
+        GIT_TAG "v4.2.6"
         EXCLUDE_FROM_ALL
-    )
-    block()
-      set(BUILD_DOCS off)
-      set(BUILD_SHARED_LIBS off)
-      FetchContent_MakeAvailable(iniparser)
-      target_link_libraries(Isle::iniparser INTERFACE iniparser-static)
-    endblock()
-else()
-    # find_package looks for already-installed system packages.
-    # Configure with `-DCMAKE_PREFIX_PATH="/path/to/package1;/path/to/package2"`
-    # to add search paths.
-    find_package(SDL3 CONFIG REQUIRED)
-
-    find_package(iniparser REQUIRED CONFIG COMPONENTS shared)
+        FIND_PACKAGE_ARGS NAMES iniparser 4.2 CONFIG COMPONENTS shared
+)
+if (FETCHCONTENT_SOURCE_DIR_INIPARSER)
+    # iniparser was downloaded instead of located on-system
+    set(BUILD_DOCS off)
+    set(BUILD_SHARED_LIBS off)
+    target_link_libraries(Isle::iniparser INTERFACE iniparser-static)
+else ()
     target_link_libraries(Isle::iniparser INTERFACE iniparser-shared)
-endif()
+endif ()
+
+FetchContent_MakeAvailable(SDL3 iniparser)
+
+#get_cmake_property(variable_names VARIABLES)
+#list(SORT variable_names)
+#foreach (variable_name ${variable_names})
+#    message(STATUS "${variable_name}=${${variable_name}}")
+#endforeach ()
+
+#if (DOWNLOAD_DEPENDENCIES)
+#    # FetchContent downloads and configures dependencies
+#    message(STATUS "Fetching SDL3 and iniparser. This might take a while...")
+#
+#
+#
+#
+#
+#    block()
+#      set(BUILD_DOCS off)
+#      set(BUILD_SHARED_LIBS off)
+#
+#    endblock()
+#else()
+#    # find_package looks for already-installed system packages.
+#    # Configure with `-DCMAKE_PREFIX_PATH="/path/to/package1;/path/to/package2"`
+#    # to add search paths.
+#    find_package(SDL3 CONFIG REQUIRED)
+#
+#    find_package(iniparser REQUIRED CONFIG COMPONENTS shared)
+#    target_link_libraries(Isle::iniparser INTERFACE iniparser-shared)
+#endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 if (ENABLE_CLANG_TIDY)
@@ -612,13 +652,12 @@ if (EXISTS "${CLANGFORMAT_BIN}")
   endif()
 endif()
 
-set(install_extra_targets)
-if(DOWNLOAD_DEPENDENCIES)
-  get_property(sdl3_type TARGET SDL3::SDL3 PROPERTY TYPE)
-  if(sdl3_type STREQUAL "SHARED_LIBRARY")
-    list(APPEND install_extra_targets "SDL3-shared")
-  endif()
-endif()
+#if(DOWNLOAD_DEPENDENCIES)
+#  get_property(sdl3_type TARGET SDL3::SDL3 PROPERTY TYPE)
+#  if(sdl3_type STREQUAL "SHARED_LIBRARY")
+#    list(APPEND install_extra_targets "SDL3-shared")
+#  endif()
+#endif()
 
 if(MSVC)
   set(CMAKE_INSTALL_BINDIR "." CACHE PATH "Binary install directory")

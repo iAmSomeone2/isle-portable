@@ -26,11 +26,12 @@
   <project_license>@APP_SPDX@</project_license>
 
   <requires>
-    <display_length side="longest" compare="ge">640</display_length>
     <internet>offline-only</internet>
   </requires>
 
   <recommends>
+    <display_length side="longest" compare="ge">640</display_length>
+    <display_length side="shortest" compare="ge">480</display_length>
     <memory>128</memory>
   </recommends>
 
