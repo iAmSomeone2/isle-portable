@@ -1,0 +1,15 @@
+{
+  "name": "Ubuntu 24.04 - LTS",
+  "build": {
+    "dockerfile": "./Containerfile"
+  },
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
+  "workspaceFolder": "/workspace",
+  "runArgs": [
+    "--cap-add=SYS_PTRACE",
+    "--security-opt",
+    "seccomp=unconfined",
+    "--privileged",
+    "--network=host"
+  ]
+}

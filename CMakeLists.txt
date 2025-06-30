@@ -14,12 +14,18 @@ include(CheckCXXSourceCompiles)
 include(CMakeDependentOption)
 include(CMakePushCheckState)
 include(cmake/detectcpu.cmake)
+include(CheckIPOSupported)
 
 DetectTargetCPUArchitectures(ISLE_CPUS)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+check_ipo_supported(RESULT IPO_SUPPORTED OUTPUT LANGUAGES C CXX)
+if (NOT IPO_SUPPORTED)
+  message(WARNING "IPO is not supported: ${output}")
+endif()
 
 if (NOT MINGW)
   set(NOT_MINGW ON)
@@ -46,6 +52,7 @@ option(DOWNLOAD_DEPENDENCIES "Download dependencies" ON)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}" CACHE PATH "Directory where to put executables and dll")
 set(ISLE_EMSCRIPTEN_HOST "" CACHE STRING "Host URL for Emscripten streaming (e.g., https://test.com)")
 cmake_dependent_option(BUILD_SHARED_LIBS "Build lego1 as a shared library" ON "NOT EMSCRIPTEN" OFF)
+cmake_dependent_option(ENABLE_LTO "Enable link-time optimization (LTO)" ON "IPO_SUPPORTED" OFF)
 
 message(STATUS "Isle app:               ${ISLE_BUILD_APP}")
 message(STATUS "Config app:             ${ISLE_BUILD_CONFIG}")
@@ -53,82 +60,41 @@ message(STATUS "Internal DirectX5 SDK:  ${ISLE_USE_DX5}")
 message(STATUS "Internal miniwin:       ${ISLE_MINIWIN}")
 message(STATUS "Isle debugging:         ${ISLE_DEBUG}")
 message(STATUS "Compile shaders:        ${ISLE_COMPILE_SHADERS}")
+message(STATUS "Link-time optimization: ${ENABLE_LTO}")
 
-# Searching for compatible libraries
-# -----
-# 1. Look for compatible installed versions first
-# 2. If not found and 'DOWNLOAD_DEPENDENCIES' is
-#   2a. 'ON': pull missing deps
-#   2b. 'OFF' fail configuration
 include(FetchContent)
 
 add_library(Isle::iniparser INTERFACE IMPORTED)
 set(install_extra_targets)
 
+# FetchContent_Declare can use find_package to look for already-installed system packages.
+# Configure with `-DCMAKE_PREFIX_PATH="/path/to/package1;/path/to/package2"`
+# to add search paths.
+
 # Find or pull SDL3 ~3.2
+set(SDL_STATIC ON)
+set(SDL_SHARED OFF)
+set(SDL_TESTS OFF)
 FetchContent_Declare(
     SDL3
-    GIT_REPOSITORY "https://github.com/libsdl-org/SDL.git"
-    GIT_TAG "release-3.2.16"
+    URL "https://github.com/libsdl-org/SDL/releases/download/release-3.2.16/SDL3-3.2.16.tar.gz"
+    URL_HASH SHA256=6340e58879b2d15830c8460d2f589a385c444d1faa2a4828a9626c7322562be8
     EXCLUDE_FROM_ALL
-    FIND_PACKAGE_ARGS NAMES SDL3 3.2 CONFIG COMPONENTS SDL3-shared
+    FIND_PACKAGE_ARGS NAMES SDL3 3.2 CONFIG COMPONENTS SDL3-static
 )
-if (FETCHCONTENT_SOURCE_DIR_SDL3)
-    # Configure the downloaded SDL3 as a static lib to simplify distribution
-    set(SDL_SHARED OFF)
-    set(SDL_STATIC ON)
-    set(SDL_TEST_LIBRARY OFF)
-    set(SDL_TESTS OFF)
-    set(SDL_DISABLE_INSTALL_DOCS ON)
-endif()
 
 # Find or pull iniparser ~4.2
+set(BUILD_DOCS OFF)
 FetchContent_Declare(
         iniparser
-        GIT_REPOSITORY "https://gitlab.com/iniparser/iniparser.git"
-        GIT_TAG "v4.2.6"
+        URL "https://gitlab.com/iniparser/iniparser/-/archive/v4.2.6/iniparser-v4.2.6.tar.bz2"
+        URL_HASH SHA256=30f8eaf74b8c4667f2adef4c6b5c50699d1fa6e3ad65b65b0993d414d7ee3118
         EXCLUDE_FROM_ALL
-        FIND_PACKAGE_ARGS NAMES iniparser 4.2 CONFIG COMPONENTS shared
+        FIND_PACKAGE_ARGS NAMES iniparser 4.2 CONFIG COMPONENTS static
 )
-if (FETCHCONTENT_SOURCE_DIR_INIPARSER)
-    # iniparser was downloaded instead of located on-system
-    set(BUILD_DOCS off)
-    set(BUILD_SHARED_LIBS off)
-    target_link_libraries(Isle::iniparser INTERFACE iniparser-static)
-else ()
-    target_link_libraries(Isle::iniparser INTERFACE iniparser-shared)
-endif ()
+target_link_libraries(Isle::iniparser INTERFACE iniparser-static)
 
 FetchContent_MakeAvailable(SDL3 iniparser)
-
-#get_cmake_property(variable_names VARIABLES)
-#list(SORT variable_names)
-#foreach (variable_name ${variable_names})
-#    message(STATUS "${variable_name}=${${variable_name}}")
-#endforeach ()
-
-#if (DOWNLOAD_DEPENDENCIES)
-#    # FetchContent downloads and configures dependencies
-#    message(STATUS "Fetching SDL3 and iniparser. This might take a while...")
-#
-#
-#
-#
-#
-#    block()
-#      set(BUILD_DOCS off)
-#      set(BUILD_SHARED_LIBS off)
-#
-#    endblock()
-#else()
-#    # find_package looks for already-installed system packages.
-#    # Configure with `-DCMAKE_PREFIX_PATH="/path/to/package1;/path/to/package2"`
-#    # to add search paths.
-#    find_package(SDL3 CONFIG REQUIRED)
-#
-#    find_package(iniparser REQUIRED CONFIG COMPONENTS shared)
-#    target_link_libraries(Isle::iniparser INTERFACE iniparser-shared)
-#endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 if (ENABLE_CLANG_TIDY)
@@ -628,6 +594,12 @@ if (MSVC)
   target_link_options(lego1 PRIVATE "/SAFESEH:NO")
 endif()
 
+if (ENABLE_LTO)
+  set_property(TARGET isle PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+  set_property(TARGET lego1 PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+  set_property(TARGET isle-config PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+endif()
+
 find_program(CLANGFORMAT_BIN NAMES clang-format)
 if (EXISTS "${CLANGFORMAT_BIN}")
   execute_process(COMMAND "${CLANGFORMAT_BIN}" --version
@@ -651,13 +623,6 @@ if (EXISTS "${CLANGFORMAT_BIN}")
     endif()
   endif()
 endif()
-
-#if(DOWNLOAD_DEPENDENCIES)
-#  get_property(sdl3_type TARGET SDL3::SDL3 PROPERTY TYPE)
-#  if(sdl3_type STREQUAL "SHARED_LIBRARY")
-#    list(APPEND install_extra_targets "SDL3-shared")
-#  endif()
-#endif()
 
 if(MSVC)
   set(CMAKE_INSTALL_BINDIR "." CACHE PATH "Binary install directory")
